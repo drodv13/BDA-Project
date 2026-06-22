@@ -1,46 +1,41 @@
-import pandas as pd
 from google.genai import types
-from .contratacion2json import construir_documento
 
-schema_read_contratacion = types.FunctionDeclaration(
-    name="read_contratacion",
+schema_run_query = types.FunctionDeclaration(
+    name="run_query",
     description=(
-        "Reads a file (CSV or Excel) containing a single contratación (public contract) record "
-        "and converts it into a structured JSON document matching the contrataciones collection schema. "
-        "Use this FIRST when the user provides a file path to a contratación, before attempting to search "
-        "for related leyes. The returned JSON gives context (sector, descripcion_proceso, monto, etc.) "
-        "needed to reason about which legal norms might be relevant."
+        "Runs a MongoDB find() query on a specified collection and returns the matching documents. "
+        "Use this for simple filtering and lookups. "
+        "The query parameter follows standard MongoDB query syntax (e.g. field filters, comparison operators). "
+        "Results are limited to avoid large payloads — use the limit parameter to control how many documents to retrieve."
     ),
     parameters=types.Schema(
         type=types.Type.OBJECT,
         properties={
-            "ruta_archivo": types.Schema(
+            "collection_name": types.Schema(
                 type=types.Type.STRING,
+                description="Name of the MongoDB collection to query ('leyes' or 'contrataciones')."
+            ),
+            "query": types.Schema(
+                type=types.Type.OBJECT,
                 description=(
-                    "Absolute or relative path to the CSV or Excel (.xlsx, .xls) file containing "
-                    "a single contratación record."
+                    "MongoDB query filter in standard MQL syntax. "
+                    "Use {} to return all documents. "
+                    "Supports operators like $gt, $lt, $in, $regex, etc."
                 )
             ),
+            "limit": types.Schema(
+                type=types.Type.INTEGER,
+                description="Maximum number of documents to return. Defaults to 5."
+            ),
         },
-        required=["ruta_archivo"]
+        required=["collection_name", "query"]
     )
 )
 
-def read_contratacion(ruta_archivo: str):
-    """
-    Lee un archivo (CSV o Excel) con una única fila de contratación
-    y devuelve el documento JSON armado mediante construir_documento().
-    """
-    if ruta_archivo.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(ruta_archivo, engine="openpyxl")
-    else:
-        df = pd.read_csv(ruta_archivo)
+def run_query(database, collection_name: str, query, limit: int = 5):
+    collection = database[collection_name]
+    results = list(collection.find(query, {"_id": 0}).limit(limit))
 
-    if df.empty:
-        return "El archivo no contiene registros."
+    if not results: return f"No results found for **'{query}'**. Try a different search term."
 
-    df["moneda"] = df["moneda"].replace({"Nuevos Soles": "Soles"})
-
-    # construir_documento espera un grupo (DataFrame), no una fila —
-    # como solo hay una fila/item, el "grupo" es el propio df
-    return construir_documento(df)
+    return results
