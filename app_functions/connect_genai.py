@@ -1,23 +1,18 @@
 import os
 from dotenv import load_dotenv
-from pymongo import MongoClient
+from google import genai
 
-
-def connect_db(database: str):
-    print("Connecting to the Mongo database...")
-
+def connect_genai():
+    print("Connecting to the Gemini API...")
     load_dotenv()
 
-    connection_string = os.getenv("MONGO_CONNECTION_STRING")
+    api_key = os.getenv("GEMINI_API_KEY")
 
-    if not connection_string: raise RuntimeError("The Mongo Connection String was not found.")
+    if not api_key: raise RuntimeError("The Gemini API Key was not found.")
 
-    client = MongoClient(connection_string)
+    client = genai.Client(api_key=api_key)
 
     if not client: raise RuntimeError("Client is None.")
 
-    db = client[database]
-
-    print("Connected to the Mongo database")
-
-    return db
+    print("Connected to the Gemini API")
+    return client
