@@ -8,10 +8,21 @@ from app_functions.call_function import (
 )
 
 
-def ask_agent(prompt):
+def ask_agent(prompt, document_content=""):
 
     client = connect_genai()
     database = connect_db("proyectoBDA")
+
+    if document_content:
+        prompt = f"""
+El usuario ha subido un documento. Usa el contenido del documento para responder si la pregunta está relacionada con él.
+
+DOCUMENTO SUBIDO:
+{document_content[:30000]}
+
+PREGUNTA DEL USUARIO:
+{prompt}
+"""
 
     messages = [
         types.Content(
