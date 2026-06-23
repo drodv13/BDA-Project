@@ -62,34 +62,25 @@ def get_year_filters(selected_year):
     if selected_year == "Todos":
         return {}, {}
 
+    year = int(selected_year)
+
+    start_date = pd.Timestamp(
+        year=year,
+        month=1,
+        day=1
+    ).to_pydatetime()
+
+    end_date = pd.Timestamp(
+        year=year + 1,
+        month=1,
+        day=1
+    ).to_pydatetime()
+
     contrataciones_match = {
-        "$or": [
-            {
-                "publicacion": {
-                    "$regex": selected_year
-                }
-            },
-            {
-                "publicacion.fecha_publicacion": {
-                    "$regex": selected_year
-                }
-            },
-            {
-                "vigencia.fecha_suscripcion": {
-                    "$regex": selected_year
-                }
-            },
-            {
-                "vigencia.fecha_inicio": {
-                    "$regex": selected_year
-                }
-            },
-            {
-                "vigencia.fecha_fin": {
-                    "$regex": selected_year
-                }
-            }
-        ]
+        "publicacion.fecha_publicacion": {
+            "$gte": start_date,
+            "$lt": end_date
+        }
     }
 
     leyes_match = {
