@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.express as px
 import PyPDF2
 
-from datetime import datetime
 from docx import Document
 
 from agent_runner import ask_agent
@@ -63,44 +62,39 @@ def get_year_filters(selected_year):
     if selected_year == "Todos":
         return {}, {}
 
-    start_date = datetime(int(selected_year), 1, 1)
-    end_date = datetime(int(selected_year) + 1, 1, 1)
-
     contrataciones_match = {
         "$or": [
             {
+                "publicacion": {
+                    "$regex": selected_year
+                }
+            },
+            {
                 "publicacion.fecha_publicacion": {
-                    "$gte": start_date,
-                    "$lt": end_date
+                    "$regex": selected_year
                 }
             },
             {
                 "vigencia.fecha_suscripcion": {
-                    "$gte": start_date,
-                    "$lt": end_date
+                    "$regex": selected_year
                 }
             },
             {
-                "$expr": {
-                    "$regexMatch": {
-                        "input": {
-                            "$toString": "$publicacion"
-                        },
-                        "regex": selected_year
-                    }
+                "vigencia.fecha_inicio": {
+                    "$regex": selected_year
+                }
+            },
+            {
+                "vigencia.fecha_fin": {
+                    "$regex": selected_year
                 }
             }
         ]
     }
 
     leyes_match = {
-        "$expr": {
-            "$regexMatch": {
-                "input": {
-                    "$toString": "$publicacion"
-                },
-                "regex": selected_year
-            }
+        "publicacion": {
+            "$regex": selected_year
         }
     }
 
@@ -327,7 +321,7 @@ with tab_dashboard:
 
         st.plotly_chart(
             fig,
-            width="stretch"
+            use_container_width=True
         )
 
     # -----------------------------
@@ -380,7 +374,7 @@ with tab_dashboard:
 
         st.plotly_chart(
             fig,
-            width="stretch"
+            use_container_width=True
         )
 
     # -----------------------------
@@ -433,14 +427,11 @@ with tab_dashboard:
 
         st.plotly_chart(
             fig,
-            width="stretch"
+            use_container_width=True
         )
 
     # -----------------------------
     # Scatter / Bubble Plot
-    # X: Número de leyes
-    # Y: Número de contrataciones
-    # Tamaño: Monto contratado
     # -----------------------------
 
     st.subheader("Relación entre Leyes, Contrataciones y Monto")
@@ -552,13 +543,13 @@ with tab_dashboard:
 
         st.plotly_chart(
             fig,
-            width="stretch"
+            use_container_width=True
         )
 
         with st.expander("Ver datos del scatter plot"):
             st.dataframe(
                 scatter_df,
-                width="stretch"
+                use_container_width=True
             )
 
     else:
