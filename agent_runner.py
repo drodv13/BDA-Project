@@ -13,9 +13,20 @@ def ask_agent(prompt, document_content=""):
     client = connect_genai()
     database = connect_db("proyectoBDA")
 
+    # Si el usuario subió un documento, respondemos directamente con Gemini
+    # usando el texto extraído del archivo. No usamos herramientas MongoDB.
     if document_content:
-        prompt = f"""
-El usuario ha subido un documento. Usa el contenido del documento para responder si la pregunta está relacionada con él.
+
+        document_prompt = f"""
+Eres un asistente especializado en analizar documentos de contrataciones públicas.
+
+El usuario ha subido un documento. Responde únicamente usando el contenido del documento subido.
+No llames herramientas externas.
+No intentes leer archivos por nombre.
+No uses read_contratacion.
+No uses run_query.
+No uses run_pipeline.
+No uses search_related_leyes.
 
 DOCUMENTO SUBIDO:
 {document_content[:30000]}
@@ -24,6 +35,28 @@ PREGUNTA DEL USUARIO:
 {prompt}
 """
 
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_text(text=document_prompt)
+                    ]
+                )
+            ],
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                temperature=0,
+            ),
+        )
+
+        return {
+            "answer": response.text,
+            "tools": []
+        }
+
+    # Si no hay documento subido, usamos el agente normal con herramientas MongoDB.
     messages = [
         types.Content(
             role="user",
