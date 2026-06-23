@@ -1,9 +1,14 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import PyPDF2
+
+from datetime import datetime
+from docx import Document
 
 from agent_runner import ask_agent
 from app_functions.connect_db import connect_db
+
 
 st.set_page_config(
     page_title="Mongo Agent",
@@ -23,6 +28,85 @@ tab_chat, tab_dashboard = st.tabs(
     ["🤖 Chat IA", "📊 Dashboard"]
 )
 
+
+def read_uploaded_file(uploaded_file):
+    if uploaded_file is None:
+        return ""
+
+    file_content = ""
+
+    if uploaded_file.type == "text/plain":
+        file_content = uploaded_file.read().decode(
+            "utf-8",
+            errors="ignore"
+        )
+
+    elif uploaded_file.type == "application/pdf":
+        pdf_reader = PyPDF2.PdfReader(uploaded_file)
+
+        for page in pdf_reader.pages:
+            file_content += page.extract_text() or ""
+
+    elif uploaded_file.type in [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword"
+    ]:
+        doc = Document(uploaded_file)
+
+        for paragraph in doc.paragraphs:
+            file_content += paragraph.text + "\n"
+
+    return file_content
+
+
+def get_year_filters(selected_year):
+    if selected_year == "Todos":
+        return {}, {}
+
+    start_date = datetime(int(selected_year), 1, 1)
+    end_date = datetime(int(selected_year) + 1, 1, 1)
+
+    contrataciones_match = {
+        "$or": [
+            {
+                "publicacion.fecha_publicacion": {
+                    "$gte": start_date,
+                    "$lt": end_date
+                }
+            },
+            {
+                "vigencia.fecha_suscripcion": {
+                    "$gte": start_date,
+                    "$lt": end_date
+                }
+            },
+            {
+                "$expr": {
+                    "$regexMatch": {
+                        "input": {
+                            "$toString": "$publicacion"
+                        },
+                        "regex": selected_year
+                    }
+                }
+            }
+        ]
+    }
+
+    leyes_match = {
+        "$expr": {
+            "$regexMatch": {
+                "input": {
+                    "$toString": "$publicacion"
+                },
+                "regex": selected_year
+            }
+        }
+    }
+
+    return contrataciones_match, leyes_match
+
+
 # ==================================================
 # CHAT
 # ==================================================
@@ -40,6 +124,25 @@ with tab_chat:
             MongoDB + Gemini
             """
         )
+
+        uploaded_file = st.file_uploader(
+            "📄 Sube un archivo para consultarlo",
+            type=["pdf", "docx", "txt"]
+        )
+
+        if "document_content" not in st.session_state:
+            st.session_state.document_content = ""
+
+        if uploaded_file:
+            st.success(f"Archivo cargado: {uploaded_file.name}")
+
+            st.session_state.document_content = read_uploaded_file(
+                uploaded_file
+            )
+
+            st.caption(
+                f"Texto extraído: {len(st.session_state.document_content):,} caracteres"
+            )
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -71,23 +174,34 @@ with tab_chat:
                 "Consultando agente..."
             ):
 
-                result = ask_agent(prompt)
+                try:
+                    result = ask_agent(
+                        prompt,
+                        st.session_state.document_content
+                    )
 
-                st.write(result["answer"])
+                    st.write(result["answer"])
 
-                if result["tools"]:
+                    if result["tools"]:
 
-                    with st.expander(
-                        "Herramientas utilizadas"
-                    ):
-                        st.json(result["tools"])
+                        with st.expander(
+                            "Herramientas utilizadas"
+                        ):
+                            st.json(result["tools"])
 
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": result["answer"]
-            }
-        )
+                    st.session_state.messages.append(
+                        {
+                            "role": "assistant",
+                            "content": result["answer"]
+                        }
+                    )
+
+                except Exception as e:
+                    st.error(
+                        "El servicio de IA está temporalmente ocupado o hubo un problema procesando la consulta. Intenta nuevamente."
+                    )
+                    st.exception(e)
+
 
 # ==================================================
 # DASHBOARD
@@ -97,10 +211,33 @@ with tab_dashboard:
 
     st.header("📊 Dashboard Analytics")
 
-    total_contrataciones = db.contrataciones.count_documents({})
-    total_leyes = db.leyes.count_documents({})
+    st.subheader("Filtro")
 
-    pipeline_total = [
+    selected_year = st.selectbox(
+        "Selecciona un año",
+        ["Todos", "2020", "2021", "2022", "2023", "2024", "2025"]
+    )
+
+    contrataciones_match, leyes_match = get_year_filters(selected_year)
+
+    total_contrataciones = db.contrataciones.count_documents(
+        contrataciones_match
+    )
+
+    total_leyes = db.leyes.count_documents(
+        leyes_match
+    )
+
+    pipeline_total = []
+
+    if contrataciones_match:
+        pipeline_total.append(
+            {
+                "$match": contrataciones_match
+            }
+        )
+
+    pipeline_total.append(
         {
             "$group": {
                 "_id": None,
@@ -109,7 +246,7 @@ with tab_dashboard:
                 }
             }
         }
-    ]
+    )
 
     monto_total_result = list(
         db.contrataciones.aggregate(
@@ -140,23 +277,36 @@ with tab_dashboard:
         f"S/ {monto_total:,.0f}"
     )
 
+    # -----------------------------
     # Contrataciones por Sector
+    # -----------------------------
 
-    sector_pipeline = [
-        {
-            "$group": {
-                "_id": "$clasificacion.sector",
-                "cantidad": {
-                    "$sum": 1
+    sector_pipeline = []
+
+    if contrataciones_match:
+        sector_pipeline.append(
+            {
+                "$match": contrataciones_match
+            }
+        )
+
+    sector_pipeline.extend(
+        [
+            {
+                "$group": {
+                    "_id": "$clasificacion.sector",
+                    "cantidad": {
+                        "$sum": 1
+                    }
+                }
+            },
+            {
+                "$sort": {
+                    "cantidad": -1
                 }
             }
-        },
-        {
-            "$sort": {
-                "cantidad": -1
-            }
-        }
-    ]
+        ]
+    )
 
     sector_df = pd.DataFrame(
         list(
@@ -177,26 +327,39 @@ with tab_dashboard:
 
         st.plotly_chart(
             fig,
-            use_container_width=True
+            width="stretch"
         )
 
+    # -----------------------------
     # Monto por Sector
+    # -----------------------------
 
-    monto_sector_pipeline = [
-        {
-            "$group": {
-                "_id": "$clasificacion.sector",
-                "monto": {
-                    "$sum": "$monto_contratado_total"
+    monto_sector_pipeline = []
+
+    if contrataciones_match:
+        monto_sector_pipeline.append(
+            {
+                "$match": contrataciones_match
+            }
+        )
+
+    monto_sector_pipeline.extend(
+        [
+            {
+                "$group": {
+                    "_id": "$clasificacion.sector",
+                    "monto": {
+                        "$sum": "$monto_contratado_total"
+                    }
+                }
+            },
+            {
+                "$sort": {
+                    "monto": -1
                 }
             }
-        },
-        {
-            "$sort": {
-                "monto": -1
-            }
-        }
-    ]
+        ]
+    )
 
     monto_df = pd.DataFrame(
         list(
@@ -217,61 +380,39 @@ with tab_dashboard:
 
         st.plotly_chart(
             fig,
-            use_container_width=True
+            width="stretch"
         )
 
-    # Monedas
-
-    moneda_pipeline = [
-        {
-            "$group": {
-                "_id": "$moneda",
-                "cantidad": {
-                    "$sum": 1
-                }
-            }
-        }
-    ]
-
-    moneda_df = pd.DataFrame(
-        list(
-            db.contrataciones.aggregate(
-                moneda_pipeline
-            )
-        )
-    )
-
-    if not moneda_df.empty:
-
-        fig = px.pie(
-            moneda_df,
-            names="_id",
-            values="cantidad",
-            title="Distribución de Monedas"
-        )
-
-        st.plotly_chart(
-            fig,
-            use_container_width=True
-        )
-
+    # -----------------------------
     # Leyes por Sector
+    # -----------------------------
 
-    leyes_pipeline = [
-        {
-            "$group": {
-                "_id": "$sector_clasificado",
-                "cantidad": {
-                    "$sum": 1
+    leyes_pipeline = []
+
+    if leyes_match:
+        leyes_pipeline.append(
+            {
+                "$match": leyes_match
+            }
+        )
+
+    leyes_pipeline.extend(
+        [
+            {
+                "$group": {
+                    "_id": "$sector_clasificado",
+                    "cantidad_leyes": {
+                        "$sum": 1
+                    }
+                }
+            },
+            {
+                "$sort": {
+                    "cantidad_leyes": -1
                 }
             }
-        },
-        {
-            "$sort": {
-                "cantidad": -1
-            }
-        }
-    ]
+        ]
+    )
 
     leyes_df = pd.DataFrame(
         list(
@@ -286,11 +427,142 @@ with tab_dashboard:
         fig = px.bar(
             leyes_df,
             x="_id",
-            y="cantidad",
+            y="cantidad_leyes",
             title="Leyes por Sector"
         )
 
         st.plotly_chart(
             fig,
-            use_container_width=True
+            width="stretch"
+        )
+
+    # -----------------------------
+    # Scatter / Bubble Plot
+    # X: Número de leyes
+    # Y: Número de contrataciones
+    # Tamaño: Monto contratado
+    # -----------------------------
+
+    st.subheader("Relación entre Leyes, Contrataciones y Monto")
+
+    contrataciones_sector_pipeline = []
+
+    if contrataciones_match:
+        contrataciones_sector_pipeline.append(
+            {
+                "$match": contrataciones_match
+            }
+        )
+
+    contrataciones_sector_pipeline.extend(
+        [
+            {
+                "$group": {
+                    "_id": "$clasificacion.sector",
+                    "numero_contrataciones": {
+                        "$sum": 1
+                    },
+                    "monto_total": {
+                        "$sum": "$monto_contratado_total"
+                    }
+                }
+            }
+        ]
+    )
+
+    leyes_sector_pipeline = []
+
+    if leyes_match:
+        leyes_sector_pipeline.append(
+            {
+                "$match": leyes_match
+            }
+        )
+
+    leyes_sector_pipeline.extend(
+        [
+            {
+                "$group": {
+                    "_id": "$sector_clasificado",
+                    "numero_leyes": {
+                        "$sum": 1
+                    }
+                }
+            }
+        ]
+    )
+
+    contrataciones_sector_df = pd.DataFrame(
+        list(
+            db.contrataciones.aggregate(
+                contrataciones_sector_pipeline
+            )
+        )
+    )
+
+    leyes_sector_df = pd.DataFrame(
+        list(
+            db.leyes.aggregate(
+                leyes_sector_pipeline
+            )
+        )
+    )
+
+    if (
+        not contrataciones_sector_df.empty
+        and not leyes_sector_df.empty
+    ):
+
+        scatter_df = pd.merge(
+            leyes_sector_df,
+            contrataciones_sector_df,
+            on="_id",
+            how="outer"
+        )
+
+        scatter_df["numero_leyes"] = scatter_df["numero_leyes"].fillna(0)
+        scatter_df["numero_contrataciones"] = scatter_df["numero_contrataciones"].fillna(0)
+        scatter_df["monto_total"] = scatter_df["monto_total"].fillna(0)
+
+        scatter_df = scatter_df.rename(
+            columns={
+                "_id": "sector"
+            }
+        )
+
+        fig = px.scatter(
+            scatter_df,
+            x="numero_leyes",
+            y="numero_contrataciones",
+            size="monto_total",
+            hover_name="sector",
+            hover_data={
+                "numero_leyes": True,
+                "numero_contrataciones": True,
+                "monto_total": ":,.0f"
+            },
+            title="Número de Leyes vs Número de Contrataciones por Sector",
+            labels={
+                "numero_leyes": "Número de leyes",
+                "numero_contrataciones": "Número de contrataciones",
+                "monto_total": "Monto contratado"
+            },
+            size_max=60
+        )
+
+        st.plotly_chart(
+            fig,
+            width="stretch"
+        )
+
+        with st.expander("Ver datos del scatter plot"):
+            st.dataframe(
+                scatter_df,
+                width="stretch"
+            )
+
+    else:
+
+        st.warning(
+            "No hay datos suficientes para construir el scatter plot con el filtro seleccionado."
         )
