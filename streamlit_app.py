@@ -200,7 +200,7 @@ with tab_dashboard:
 
     selected_year = st.selectbox(
         "Selecciona un año",
-        ["Todos", "2020", "2021", "2022", "2023", "2024", "2025"]
+        ["Todos", "2020", "2021", "2022", "2023", "2024", "2025","2026"]
     )
 
     contrataciones_match, leyes_match = get_year_filters(selected_year)
