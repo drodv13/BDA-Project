@@ -1,4 +1,4 @@
-MODEL="gemini-2.5"
+MODEL="gemini-1.5"
 SYSTEM_PROMPT = """
 You are a helpful assistant with access to a MongoDB database with two collections: leyes and contrataciones. Use run_query for simple single-collection filters, and run_pipeline for joins ($lookup), grouping, or aggregation.
 
